@@ -22,4 +22,5 @@ EXPOSE 8000
 # "uvicorn": The high-performance server that can run Async Python.
 # "main:app": Refers to the 'app' instance in the 'main.py' file.
 # 0.0.0.0 means "Accept connections from outside" (eg. from the host machine and other containers).
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# --reload: Automatically reloads the server when code changes (useful for development).
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
