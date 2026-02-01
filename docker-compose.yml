@@ -1,0 +1,91 @@
+services:
+  # ----------------------------------------------------
+  # SERVICE 1: DATABASE (PostgreSQL)
+  # ----------------------------------------------------
+  db:
+    image: postgres:15-alpine  # Alpine is lighter/smaller
+    container_name: inventory_db
+    restart: always
+    env_file: .env  # Injects user/pass from your .env file
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data # Persist data even if container dies
+    networks:
+      - inventory_net
+    # ARCHITECT'S NOTE: THE RACE CONDITION FIX
+    # This command runs inside the container every 5s to check if DB is ready.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ----------------------------------------------------
+  # SERVICE 2: CACHE (Redis)
+  # ----------------------------------------------------
+  redis:
+    image: redis:alpine
+    container_name: inventory_redis
+    restart: always
+    networks:
+      - inventory_net
+    # Redis is fast, but a basic healthcheck is still best practice
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  # ----------------------------------------------------
+  # SERVICE 3: BACKEND (Python/Uvicorn)
+  # ----------------------------------------------------
+  backend:
+    build: 
+      context: ./backend # Looks for Dockerfile in /backend folder
+    container_name: inventory_backend
+    ports:
+      - "8000:8000" # Maps localhost:8000 -> container:8000
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy # Wait for DB to be ACTUALLY ready
+      redis:
+        condition: service_healthy
+    networks:
+      - inventory_net
+    # Mounting code allows 'hot reload' without rebuilding images (Dev only)
+    volumes:
+      - ./backend:/app 
+
+  # ----------------------------------------------------
+  # SERVICE 4: FRONTEND (Vite)
+  # ----------------------------------------------------
+  frontend:
+    build: 
+      context: ./frontend
+    container_name: inventory_frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:8000 # Browser needs localhost, not container name
+    depends_on:
+      - backend # Frontend doesn't need strict healthcheck, just order
+    networks:
+      - inventory_net
+    # Hot reload for Frontend development
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules # Prevent host node_modules from overwriting container's
+
+# ----------------------------------------------------
+# NETWORKS & VOLUMES
+# ----------------------------------------------------
+networks:
+  inventory_net:
+    driver: bridge # Creates a private internal network for these services
+
+volumes:
+  postgres_data: # Named volume for DB persistence
