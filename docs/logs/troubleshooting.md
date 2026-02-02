@@ -40,3 +40,29 @@ Bash
 docker-compose down
 
 down stops the containers AND removes them, freeing the ports immediately.
+
+
+---------------------------------------------------------------------------------------------------------
+
+
+📄 Troubleshooting Log: Connectivity Testing in Minimal Containers
+Date: February 2, 2026 Issue: OCI runtime exec failed: ... executable file not found in $PATH
+
+🔴 The Symptom
+When trying to debug networking using standard Linux commands (ping, curl, telnet) inside a container, the command fails because the binary is missing.
+
+🔍 The Root Cause
+Modern Docker images (even "heavy" ones like python:3.12 or node:20) exclude administration tools to reduce image size and improve security (Attack Surface Reduction).
+
+✅ The Solution
+Do not install ping. Instead, use the runtime already present in the container (Python or Node) to test TCP connectivity.
+
+For Python Containers (Backend):
+
+Bash
+python -c "import socket; socket.create_connection(('target_host', port))"
+
+For Node.js Containers (Frontend):
+
+Bash
+node -e 'const net = require("net"); const client = net.createConnection({ port: 5432, host: "db" }, () => { console.log("Connected (BAD!)"); client.end(); }); client.on("error", (err) => { console.log("Connection Failed (GOOD!): " + err.message); });'
