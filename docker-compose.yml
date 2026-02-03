@@ -13,8 +13,9 @@ services:
       - POSTGRES_DB=${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data # Persist data even if container dies
+      - ./db_init/init.sql:/docker-entrypoint-initdb.d/init.sql # Initial SQL script
     networks:
-      - inventory_net
+      - backend_tier # Database is isolated in backend network
     # ARCHITECT'S NOTE: THE RACE CONDITION FIX
     # This command runs inside the container every 5s to check if DB is ready.
     healthcheck:
@@ -31,7 +32,7 @@ services:
     container_name: inventory_redis
     restart: always
     networks:
-      - inventory_net
+      - backend_tier # Redis is isolated in backend network
     # Redis is fast, but a basic healthcheck is still best practice
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -55,7 +56,8 @@ services:
       redis:
         condition: service_healthy
     networks:
-      - inventory_net
+      - backend_tier # To talk to DB and Redis
+      - frontend_tier # To talk to Frontend
     # Mounting code allows 'hot reload' without rebuilding images (Dev only)
     volumes:
       - ./backend:/app 
@@ -74,7 +76,7 @@ services:
     depends_on:
       - backend # Frontend doesn't need strict healthcheck, just order
     networks:
-      - inventory_net
+      - frontend_tier # can not see the db or redis
     # Hot reload for Frontend development
     volumes:
       - ./frontend:/app
@@ -84,8 +86,10 @@ services:
 # NETWORKS & VOLUMES
 # ----------------------------------------------------
 networks:
-  inventory_net:
-    driver: bridge # Creates a private internal network for these services
+  backend_tier:
+    driver: bridge
+  frontend_tier:
+    driver: bridge
 
 volumes:
   postgres_data: # Named volume for DB persistence
