@@ -50,3 +50,12 @@ docker-compose logs -f
 # Check just the Database logs (good for seeing init.sql errors)
 docker-compose logs -f db
 ```
+
+## 🚦 Docker Lifecycle: The Decision Matrix
+
+| IF I Changed... | THEN Run... | WHY? |
+| :--- | :--- | :--- |
+| **Python / JS Code**<br>(`main.py`, `App.jsx`) | **Nothing** (Just Save) | Volumes map your local file directly into the container. Hot-reload handles the rest. |
+| **Dependencies**<br>(`requirements.txt`, `package.json`) | `docker-compose up --build` | Libraries are installed inside the Image. You must rebuild the image to add them. |
+| **Configuration**<br>(`.env`, `docker-compose.yml`) | `docker-compose up` | Docker needs to recreate the container config (Ports, Env Vars). |
+| **Database Schema**<br>(`init.sql`) | `docker-compose down -v` | The DB initialization script only runs if the volume is empty. You must wipe the volume. |
