@@ -13,6 +13,7 @@ services:
       - POSTGRES_DB=${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data # Persist data even if container dies
+      - ./db_init/init.sql:/docker-entrypoint-initdb.d/init.sql # Initial SQL script
     networks:
       - backend_tier # Database is isolated in backend network
     # ARCHITECT'S NOTE: THE RACE CONDITION FIX
