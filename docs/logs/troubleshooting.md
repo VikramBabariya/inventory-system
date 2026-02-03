@@ -105,3 +105,28 @@ docker-compose up --build -d
 🛡️ Prevention
 * If you change the schema (init.sql) in development, you must run down -v to apply changes.
 * In production, we never use init.sql for updates; we use Migration tools (like Alembic) instead.
+
+
+---------------------------------------------------------------------------------------------------------
+
+
+### 📄 Troubleshooting Log: Missing Python Libraries
+
+**Date:** February 3, 2026
+**Issue:** `ModuleNotFoundError: No module named 'sqlalchemy'` (or similar) in backend logs.
+
+#### 🔴 The Symptom
+The container starts, but the backend service crashes immediately.
+Running `docker logs inventory_backend` reveals an import error for a library you just added to `requirements.txt`.
+
+#### 🔍 The Root Cause
+**Stale Docker Image.**
+Docker images are built in layers. If you modify `requirements.txt`, Docker does not know it needs to re-run `pip install` unless you explicitly tell it to rebuild. It is reusing the old image which only has the old libraries.
+
+#### ✅ The Solution
+Force a rebuild of the container image to trigger the installation step.
+
+**Command:**
+```bash
+docker-compose up --build
+```
