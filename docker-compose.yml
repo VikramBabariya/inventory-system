@@ -46,6 +46,7 @@ services:
   backend:
     build: 
       context: ./backend # Looks for Dockerfile in /backend folder
+      dockerfile: Dockerfile.dev  # <--- Point to the Dev file
     container_name: inventory_backend
     ports:
       - "8000:8000" # Maps localhost:8000 -> container:8000
@@ -68,6 +69,7 @@ services:
   frontend:
     build: 
       context: ./frontend
+      dockerfile: Dockerfile.dev  # <--- Point to the Dev file
     container_name: inventory_frontend
     ports:
       - "5173:5173"
