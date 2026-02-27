@@ -10,6 +10,8 @@
 Before provisioning, the following cost-control measures are mandatory:
 * **Billing Alarm:** An AWS Budget alert is set at ₹500 to prevent accidental Free Tier overages.
 * **Resource Lifecycle:** All resources (EC2, VPC, IGW) must be manually spun down if not actively in use during the ClickOps testing phase.
+* **Lifecycle Strategy (FinOps):** The `t3.small` instance operates on a strict "Start/Stop" schedule. It is shut down outside of active development hours.
+* **IP Address Trade-off:** To avoid idle charges associated with Elastic IPs, the architecture relies on an Ephemeral Public IP. The IP will change upon every instance restart, which is an accepted friction point to minimize the AWS bill to storage-only costs (EBS) during downtime.
 
 ## 2. Network Foundation (VPC & Subnets)
 | Component | CIDR Block | Usable IPs | Architectural Justification (The "Why") |
