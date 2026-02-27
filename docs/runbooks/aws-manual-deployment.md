@@ -17,6 +17,15 @@
 | :--- | :--- | :--- | :--- | :--- |
 | `inventory-web-sg` | EC2 ENI (Pending) | HTTP (80) from `0.0.0.0/0`<br>SSH (22) from `<YOUR_IP>/32` | All Traffic to `0.0.0.0/0` | Provisioned |
 
+## Execution Log: Compute Provisioning
+
+| Component | Configuration | Architectural Justification | Status |
+| :--- | :--- | :--- | :--- |
+| **EC2 Instance** | `t3.small` (Ubuntu 24.04 LTS) | 2GB RAM prevents OOM errors during Vite/React build processes. | Provisioned |
+| **Network Location** | `inventory-public-subnet-1a` | Assigned a Public IP for direct administration. Protected by `inventory-web-sg`. | Configured |
+| **Storage (EBS)** | 15 GiB gp3 (Encrypted via KMS) | Increased capacity for Docker. **Security:** Data at rest encryption enforced. | Provisioned |
+| **Authentication** | `inventory-key.pem` (RSA) | Key securely stored locally. Will enforce `chmod 400` before SSH attempt. | Generated |
+
 Firewall Rules: A strict ledger of your Security Group inbound rules (Port 80 from anywhere, Port 22 from your exact static IP only).
 
 Instance Specs: Record the AMI ID used for Ubuntu 24.04 LTS and the instance type (t3.small).
