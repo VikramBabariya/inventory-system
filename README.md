@@ -72,3 +72,23 @@ PostgreSQL was selected over NoSQL alternatives specifically for its transaction
 | **Containerization** | Docker, Docker Compose | Multi-service orchestration |
 | **DB Driver** | psycopg2-binary | PostgreSQL ↔ Python connector |
 | **Config** | python-dotenv | Environment variable management |
+
+---
+
+## Architecture Decision Records
+
+All major technical choices are documented as ADRs in [`/docs/decisions`](./docs/decisions/).
+
+| ADR | Decision | Status |
+| :--- | :--- | :--- |
+| [001](./docs/decisions/001-backend-framework.md) | FastAPI over Flask/Django | Accepted |
+| [002](./docs/decisions/002-frontend-framework.md) | React + Vite over CRA | Accepted |
+| [003](./docs/decisions/003-reverse-proxy.md) | Nginx as reverse proxy | Accepted |
+| [004](./docs/decisions/004-database-strategy.md) | PostgreSQL over NoSQL | Accepted |
+| [005](./docs/decisions/005-database-isolation.md) | Docker network segmentation | Accepted |
+| [006](./docs/decisions/006-caching-stratagy.md) | Redis Cache-Aside pattern | Accepted |
+| [007](./docs/decisions/007-ledger-pattern-vs-snapshot-updates.md) | Ledger pattern over snapshot updates | Accepted |
+| [008](./docs/decisions/008-multi-stage-builds.md) | Multi-stage Docker builds | Accepted |
+| [009](./docs/decisions/009-dual-environment-config.md) | Dual-environment Compose config | Accepted |
+
+
