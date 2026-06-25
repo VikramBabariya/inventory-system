@@ -56,3 +56,19 @@ A single public entry point on port 80. Nginx routes traffic to the correct cont
 
 ### ACID-Compliant Data Store
 PostgreSQL was selected over NoSQL alternatives specifically for its transaction guarantees. A stock deduction and a ledger entry must either both succeed or both fail — eventual consistency is not acceptable for inventory. Foreign key constraints (`stock_movements.product_id → products.id`) are enforced at the engine level.
+
+
+---
+
+## Tech Stack
+
+| Layer | Technology | Purpose |
+| :--- | :--- | :--- |
+| **Backend** | Python 3.12, FastAPI | Async REST API, auto-generated OpenAPI docs |
+| **ORM** | SQLAlchemy | Database session management, model definitions |
+| **Database** | PostgreSQL 15 (Alpine) | ACID-compliant relational data store |
+| **Frontend** | React 19, Vite | SPA with component-based UI |
+| **Web Server** | Nginx (Alpine) | Static file serving, reverse proxy (production) |
+| **Containerization** | Docker, Docker Compose | Multi-service orchestration |
+| **DB Driver** | psycopg2-binary | PostgreSQL ↔ Python connector |
+| **Config** | python-dotenv | Environment variable management |
