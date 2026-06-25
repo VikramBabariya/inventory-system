@@ -91,6 +91,20 @@ All major technical choices are documented as ADRs in [`/docs/decisions`](./docs
 | [008](./docs/decisions/008-multi-stage-builds.md) | Multi-stage Docker builds | Accepted |
 | [009](./docs/decisions/009-dual-environment-config.md) | Dual-environment Compose config | Accepted |
 
+---
+
+## Security Overview
+
+| Control | Implementation |
+| :--- | :--- |
+| Network isolation | Database unreachable from frontend tier by network topology |
+| Non-root containers | `appuser` (UID 1000) in all production images |
+| Minimal attack surface | No compilers, no shell tools in production runtime |
+| Secret management | `.env` git-ignored; runtime injection only |
+| Reverse proxy | Nginx terminates public traffic; app servers not directly exposed |
+| Immutable images | No bind mounts in production; code baked into image |
+
+---
 
 
 ## Getting Started
