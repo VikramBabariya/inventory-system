@@ -11,55 +11,48 @@ A full-stack inventory system designed to track products, categories, and stock 
 The core engineering challenge: how do you track inventory changes safely, audit every movement, and deploy a secure, minimal-footprint system? This project addresses all three.
 
 ---
+
+## Key Technical Highlights
+
+### Immutable Ledger Architecture
+Stock is never overwritten. Every change (sale, restock, return, damage) is recorded as a signed delta (`+10`, `-5`) in an append-only `stock_movements` table. The `current_stock` field on the `products` table is a denormalized snapshot maintained for read performance. This mirrors the double-entry bookkeeping pattern used in financial systems — history is always preserved and fully auditable.
+
+### Multi-Tier Network Isolation
+Two Docker bridge networks enforce strict service boundaries:
+
+- `frontend_tier` — React frontend and FastAPI backend
+- `backend_tier` — FastAPI backend, PostgreSQL, and Redis (planned)
+
+The database has **no IP route** to the frontend container. A compromised frontend cannot reach the database — not by configuration, but by network topology. The FastAPI backend is the sole authorized gateway to data.
+
+### Multi-Stage Docker Builds
+Production images are built in two stages: a builder stage that compiles dependencies (including C-extensions via `gcc`), and a minimal runtime stage that copies only the final artifacts. Compilers, build tools, and intermediate files are discarded entirely.
+
+| Service | Dev Image | Prod Image | Reduction |
 | :--- | :--- | :--- | :--- |
-| **WSL** | `v2.x` | Docker desktop requires this in windowes |  |
-| **Node.js** | `v24.x` (LTS) | Backend Runtime | [Download](https://nodejs.org/en) |
-| **Docker Desktop** | `v4.20+` (Ensure "Use Docker Compose V2" is enabled in settings) | Containerization | [Get Docker Desktop](https://www.docker.com/products/docker-desktop/) |
-| **Make** | `v4.x` | Build Automation | Pre-installed on Mac/Linux (Use Chocolatey for Windows) |
-| **AWS CLI** | `v2.x` | Cloud Deployment | [Install Guide](https://aws.amazon.com/cli/) |
+| Frontend | `node:20` — 1.84 GB | `nginx:alpine` — ~93 MB | **~95%** |
+| Backend | `python:3.12` — 1.63 GB | `python:3.12-slim` — ~271 MB | **~83%** |
+| **Total** | **~3.5 GB** | **~364 MB** | **~90%** |
 
-### ✅ Check Installation
-Run the following commands to verify your setup:
+### Container Security Hardening
+- Non-root user (`appuser`, UID 1000) in all production containers — prevents container breakout from escalating to host privileges
+- No compilers in production images — attackers cannot compile exploits or cryptominers inside a compromised container
+- No shell tools (`curl`, `wget`, `git`) in production runtime — limits lateral movement
+- Secrets injected at runtime via environment variables, never written to the filesystem
 
-```bash
-node --version   # Should be v24.x
-npm --version    # Should be v11.x
-docker --version # Should be v29.x or higher
-```
+### Dual-Environment Orchestration
+Two separate Docker Compose files with explicitly different contracts:
 
-## 🚀 Quick Start
+| Feature | `docker-compose.yml` (Dev) | `docker-compose.prod.yml` (Prod) |
+| :--- | :--- | :--- |
+| Code Source | Bind-mounted from host | Baked into image (`COPY`) |
+| Frontend Server | Vite dev server (HMR) | Nginx (static file serving) |
+| Restart Policy | Off | `always` (self-healing) |
+| Security | Loose (debug, open ports) | Strict (minimal ports, non-root) |
+| Image Type | `Dockerfile.dev` | `Dockerfile` (multi-stage) |
 
-### Option A: Development Mode (Hot Reload)
-*Best for coding. Changes appear instantly.*
+### Nginx as Reverse Proxy
+A single public entry point on port 80. Nginx routes traffic to the correct container by URL path (`/api/` → FastAPI, `/` → React SPA), solves CORS automatically, and handles the SPA fallback (`try_files $uri /index.html`) for client-side routing. Application servers (Uvicorn) are never exposed to the public directly.
 
-1.  **Clone & Setup:**
-    ```bash
-    git clone <your-repo-url>
-    cd inventory-system
-    cp .env.example .env
-    ```
-2.  **Run:**
-    ```bash
-    docker-compose up --build
-    ```
-3.  **Access:**
-    * Frontend: `http://localhost:5173`
-    * Backend Docs: `http://localhost:8000/docs`
-
-### Option B: Production Mode (Optimized)
-*Best for performance testing. Uses Nginx & Static Builds.*
-
-1.  **Run:**
-    ```bash
-    docker-compose -f docker-compose.prod.yml up --build
-    ```
-2.  **Access:**
-    * App: `http://localhost:5173` (Served via Nginx)
-
-## 📊 Performance Benchmarks (Phase 4)
-
-We utilize Multi-Stage Docker builds to minimize attack surface and storage costs.
-
-* **Frontend:** Reduced by **95%** (1.84GB $\to$ 93MB).
-* **Backend:** Reduced by **83%** (1.63GB $\to$ 271MB).
-* **Security:** Production containers run as non-root users and contain no compilers.
+### ACID-Compliant Data Store
+PostgreSQL was selected over NoSQL alternatives specifically for its transaction guarantees. A stock deduction and a ledger entry must either both succeed or both fail — eventual consistency is not acceptable for inventory. Foreign key constraints (`stock_movements.product_id → products.id`) are enforced at the engine level.
