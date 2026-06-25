@@ -92,3 +92,26 @@ All major technical choices are documented as ADRs in [`/docs/decisions`](./docs
 | [009](./docs/decisions/009-dual-environment-config.md) | Dual-environment Compose config | Accepted |
 
 
+
+## Getting Started
+
+See the full setup and operations guide: [`docs/runbooks/local-development.md`](./docs/runbooks/local-development.md)
+
+**Quick start:**
+
+```bash
+git clone <repo-url>
+cd inventory-system
+cp .env.example .env
+docker-compose up --build
+```
+
+| Service | URL |
+| :--- | :--- |
+| Frontend | http://localhost:5173 |
+| Backend API | http://localhost:8000 |
+| API Docs | http://localhost:8000/docs |
+
+---
+
+---
