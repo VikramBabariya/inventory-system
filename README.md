@@ -1,7 +1,16 @@
-## 🛠️ Prerequisites
-Before running this project, ensure you have the following installed:
+# Inventory System
 
-| Tool | Required Version | Purpose | Installation Link |
+> Containerized inventory platform built with a production-grade, security-first architecture. Demonstrates multi-tier Docker network isolation, an immutable ledger pattern for audit-safe stock tracking, and multi-stage builds that reduced deployment artifacts by 90%.
+
+---
+
+## Overview
+
+A full-stack inventory system designed to track products, categories, and stock movements across a warehouse operation. The project prioritizes architectural correctness over feature breadth — every infrastructure decision is documented, justified, and built to production standards.
+
+The core engineering challenge: how do you track inventory changes safely, audit every movement, and deploy a secure, minimal-footprint system? This project addresses all three.
+
+---
 | :--- | :--- | :--- | :--- |
 | **WSL** | `v2.x` | Docker desktop requires this in windowes |  |
 | **Node.js** | `v24.x` (LTS) | Backend Runtime | [Download](https://nodejs.org/en) |
