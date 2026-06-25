@@ -128,4 +128,40 @@ docker-compose up --build
 
 ---
 
----
+## Roadmap
+
+The current state of the project is a fully operational local development environment with a production-grade infrastructure foundation. Planned epics are sequenced below.
+
+### Phase 3 — Caching Layer 
+- [ ] Integrate Redis with Python `redis-py` client
+- [ ] Implement Cache-Aside pattern on stock read endpoints
+- [ ] Add cache invalidation on write operations
+- [ ] Expose `REDIS_URL` as configurable environment variable
+
+### Phase 4 — API Completion
+- [ ] `POST /products` — create product
+- [ ] `POST /stock/movement` — record a stock change (sale, restock, return)
+- [ ] `GET /stock/{sku}` — get current stock with cache-first lookup
+- [ ] Pydantic request/response schemas with input validation
+
+### Phase 5 — Frontend Dashboard
+- [ ] Product listing with live stock levels
+- [ ] Stock movement form (sale / restock / return)
+- [ ] Movement history table per product
+- [ ] Category filter and SKU search
+
+### Phase 6 — AWS Deployment 
+- [ ] Provision custom VPC (`10.0.0.0/16`) in `ap-south-1`
+- [ ] Deploy to EC2 `t3.small` (Ubuntu 24.04 LTS)
+- [ ] Security Group: port 80 open, port 22 restricted to admin IP (`/32`)
+- [ ] Push production images to Amazon ECR
+- [ ] Inject secrets via AWS Systems Manager Parameter Store
+- [ ] Add HTTPS via Let's Encrypt / Certbot on Nginx
+
+### Phase 7 — Observability & Hardening
+- [ ] Structured JSON logging across backend services
+- [ ] Docker health check coverage for all services
+- [ ] Vulnerability scanning with Trivy in CI pipeline
+- [ ] Rate limiting via Nginx configuration
+- [ ] CI/CD pipeline (GitHub Actions → ECR → EC2)
+  
