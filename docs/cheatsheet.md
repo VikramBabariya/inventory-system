@@ -26,7 +26,11 @@ docker-compose down
 #### 🐚 Access SQL Shell (PSQL)*
 Log into the database container to run queries manually.
 ```bash
-docker exec -it inventory_db psql -U admin -d inventory_db
+# Development
+docker exec -it inventory-system-db-1 psql -U admin -d inventory_db
+
+# Production
+docker exec -it inventory-system-db-1 psql -U admin -d inventory_db
 ```
 
 #### 🧪 Common Queries
@@ -34,19 +38,47 @@ docker exec -it inventory_db psql -U admin -d inventory_db
 -- Check if tables exist
 \dt
 
--- Check Master Data
-SELECT * FROM products;
+-- Check Master Data (with category names)
+SELECT p.sku, p.name, c.name AS category, p.price, p.current_stock
+FROM products p
+JOIN categories c ON p.category_id = c.id;
 
 -- Check Ledger (History)
-SELECT * FROM stock_movements;
+SELECT * FROM stock_movements ORDER BY created_at DESC;
+
+-- Verify ledger sum matches current_stock snapshot
+SELECT p.name, p.current_stock, SUM(sm.change_amount) AS ledger_total
+FROM products p
+JOIN stock_movements sm ON sm.product_id = p.id
+GROUP BY p.id, p.name, p.current_stock;
 ```
+
+### 🌐 API Endpoints
+
+| Method | Endpoint | Description |
+| :----- | :------- | :---------- |
+| `GET` | `/health` | Backend + DB connectivity check |
+| `GET` | `/products` | All products with category info |
+| `POST` | `/products/{id}/movements` | Record a SALE or RESTOCK |
+| `GET` | `/products/{id}/movements` | Full movement history for a product |
+
+**Example — record a sale:**
+```bash
+curl -X POST http://localhost:8000/products/1/movements \
+  -H "Content-Type: application/json" \
+  -d '{"change_amount": -1, "movement_type": "SALE"}'
+```
+
+**Movement types:** `SALE`, `RESTOCK`, `RETURN`, `DAMAGE`
+
+> **Note:** In production, all API calls from the browser go through Nginx at `/api/` — e.g. `/api/products`. Nginx strips the `/api/` prefix and proxies to `http://backend:8000/`.
 
 ### 🛠️ Debugging
 
 #### 🐍 Test Backend Connectivity (Python)
 Run this from Host to verify Backend -> DB connection.
 ```bash
-docker exec -it inventory_backend python -c "import socket; print('Connected!' if socket.create_connection(('db', 5432)) else 'Failed')"
+docker exec -it inventory-system-backend-1 python -c "import socket; print('Connected!' if socket.create_connection(('db', 5432)) else 'Failed')"
 ```
 
 #### 🔍 Check Logs
@@ -56,19 +88,22 @@ docker-compose logs -f
 
 # Check just the Database logs (good for seeing init.sql errors)
 docker-compose logs -f db
+
+# Production logs
+docker-compose -f docker-compose.prod.yml logs -f
 ```
 
 #### 🐚 Access Container Shell
 Go inside the container to check files or run commands manually.
 ```bash
 # For Backend
-docker exec -it inventory_backend bash
+docker exec -it inventory-system-backend-1 bash
 
 # For Frontend (Prod/Alpine) uses 'sh' not 'bash'
-docker exec -it inventory_frontend sh
+docker exec -it inventory-system-frontend-1 sh
 
 # For Database
-docker exec -it inventory_db psql -U admin -d inventory_db
+docker exec -it inventory-system-db-1 psql -U admin -d inventory_db
 ```
 
 #### 📏 Check Image Sizes
