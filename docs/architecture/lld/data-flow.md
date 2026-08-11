@@ -13,16 +13,20 @@ Our data flow relies on three core networking concepts:
 * **Container Isolation:** The internal bridge network created by Docker, which keeps database traffic entirely off the AWS VPC network.
 
 ## 2. Inbound Data Flow (The User Journey)
-Trace of a standard `GET /api/inventory` request from an external user to the backend database.
+Trace of a standard `GET /api/products` request from an external user to the backend database.
 
-1. **The Internet:** User accesses the application via the Public IP.
+> **Key architectural note:** Nginx is embedded inside the frontend container (not a standalone service). The multi-stage Docker build compiles React into static files, then drops them into an Nginx image. Nginx serves the static files **and** proxies `/api/*` requests to the backend.
+
+1. **The Internet:** User accesses the application via the Public IP (locally: `localhost:5173`).
 2. **Internet Gateway (IGW):** Receives the packet. Performs a 1-to-1 NAT translation, converting the destination from the Public IP to the EC2 instance's Private IP.
 3. **Route Table:** Verifies the destination private IP is within the `10.0.0.0/16` local route and directs it to the Public Subnet.
 4. **Network ACL (NACL):** The stateless subnet boundary evaluates the packet. (Default rule: Allow All).
 5. **Security Group:** The stateful instance boundary evaluates the packet against its rules. (Rule: Allow Port 80 `0.0.0.0/0` -> Permitted).
-6. **Host OS (Ubuntu):** The packet hits the EC2's Elastic Network Interface (ENI). The Docker daemon is listening on Host Port 80.
-7. **Docker Proxy:** Forwards the packet from Host Port 80 into the isolated Docker bridge network.
-8. **Nginx Container:** Receives the request, terminates the HTTP connection, and acts as a reverse proxy, forwarding the request to the FastAPI container on Port 8000.
+6. **Host OS:** The packet hits the EC2's Elastic Network Interface (ENI). The Docker daemon is listening on Host Port 80 (mapped to `5173:80` in the compose file).
+7. **Docker Proxy:** Forwards the packet from the host port into the isolated Docker bridge network.
+8. **Nginx (inside Frontend Container):** Receives the request and applies routing rules from `nginx.conf`:
+   - Requests to `/api/*` → stripped of `/api/` prefix and proxied to `http://backend:8000/`
+   - All other requests → served from `/usr/share/nginx/html` (the compiled React bundle), with SPA fallback to `index.html`
 9. **FastAPI Container:** Processes the business logic and makes a TCP connection to PostgreSQL on Port 5432 to query data.
 
 ## 3. Outbound Data Flow (Server Updates & Responses)
