@@ -130,3 +130,114 @@ Force a rebuild of the container image to trigger the installation step.
 ```bash
 docker-compose up --build
 ```
+
+
+---------------------------------------------------------------------------------------------------------
+
+
+### 📄 Troubleshooting Log: Stale Data After Manual Database Edit
+
+**Date:** 2026-08-11
+**Issue:** Data edited directly in PostgreSQL is not reflected in the API response.
+
+#### 🔴 The Symptom
+You connect to the database shell and manually update a row (e.g. `UPDATE products SET current_stock = 99 ...`).
+When you call `GET /products`, the old value is still returned.
+
+#### 🔍 The Root Cause
+The API response is being served from the Redis cache (`products:all` key), not from PostgreSQL.
+The cache has a 1-hour TTL and is only invalidated when a write goes through the API
+(`POST /products/{id}/movements`). A direct DB edit bypasses the API entirely, so the cache
+is never told to refresh.
+
+#### ✅ The Solution
+Manually flush the Redis cache to force the next API read to fetch fresh data from PostgreSQL.
+
+```bash
+# Flush all cached keys
+docker exec -it inventory-system-redis-1 redis-cli FLUSHALL
+
+# Or delete just the affected key
+docker exec -it inventory-system-redis-1 redis-cli DEL "products:all"
+```
+
+🛡️ **Prevention:** Always record stock changes through the API, not via direct SQL edits.
+The API handles cache invalidation automatically as part of the write path.
+
+
+---------------------------------------------------------------------------------------------------------
+
+
+### 📄 Troubleshooting Log: Redis Unavailable / Backend Starts Without Cache
+
+**Date:** 2026-08-11
+**Issue:** `GET /health` returns `"cache": "unavailable"` but the app still works.
+
+#### 🔴 The Symptom
+The health endpoint returns:
+```json
+{"status": "healthy", "database": "connected", "cache": "unavailable"}
+```
+The app is responding normally but all reads are going directly to PostgreSQL.
+
+#### 🔍 The Root Cause
+Redis is either not running, still starting up, or crashed.
+The backend is designed to degrade gracefully — if Redis is unreachable, all cache
+operations silently fall back to PostgreSQL. This is intentional behaviour, not a bug.
+
+#### ✅ The Solution
+
+```bash
+# Check if the Redis container is running
+docker compose ps
+
+# If redis is not running, restart it
+docker compose restart redis
+
+# Confirm Redis is healthy
+docker exec -it inventory-system-redis-1 redis-cli ping
+# Expected: PONG
+
+# Confirm health endpoint now shows cache connected
+curl http://localhost:8000/health
+```
+
+If the container keeps restarting, check its logs:
+```bash
+docker compose logs redis
+```
+
+
+---------------------------------------------------------------------------------------------------------
+
+
+### 📄 Troubleshooting Log: Inspecting What Is Currently Cached
+
+**Date:** 2026-08-11
+**Issue:** Need to verify what keys are in Redis and whether caching is working.
+
+#### ✅ Useful Redis CLI Commands
+
+```bash
+# List all active cache keys
+docker exec -it inventory-system-redis-1 redis-cli KEYS "*"
+# Expected when cache is warm: "products:all"  "movements:1"  "movements:2"
+
+# Check TTL remaining on a key (how many seconds until it expires)
+docker exec -it inventory-system-redis-1 redis-cli TTL "products:all"
+# Expected: a number <= 3600 (e.g. 3247)
+# -1 means no TTL set (should not happen)
+# -2 means key does not exist (cache miss or already expired)
+
+# Read the raw cached value (JSON string)
+docker exec -it inventory-system-redis-1 redis-cli GET "products:all"
+
+# Count total number of cached keys
+docker exec -it inventory-system-redis-1 redis-cli DBSIZE
+```
+
+#### Confirming Cache HIT vs MISS via Backend Logs
+
+The SQLAlchemy engine has `echo=True` in `database.py`.
+- On a **cache MISS**: you will see `SELECT` statements in `docker compose logs backend`
+- On a **cache HIT**: no SQL appears — the response came entirely from Redis
