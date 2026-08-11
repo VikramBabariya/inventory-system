@@ -1,7 +1,10 @@
 # Database Architecture & Schema
 
 ## 1. Overview
-The inventory system uses a **Relational Database (PostgreSQL)** to manage product data, strict categorization, and a complete audit trail of stock movements.
+The inventory system uses **PostgreSQL** as its relational source of truth and **Redis** as an in-memory cache layer.
+
+- **PostgreSQL** manages product data, categories, and the immutable stock movement ledger.
+- **Redis** caches the results of expensive read queries (product list, movement history) with a 1-hour TTL, reducing PostgreSQL load on repeated reads. Cache is invalidated automatically on every write. See [ADR-006](../decisions/006-caching-stratagy.md) for the full caching strategy.
 
 ## 2. Entity Relationship Diagram (ERD)
 The following diagram illustrates the relationships using Crow's Foot notation:

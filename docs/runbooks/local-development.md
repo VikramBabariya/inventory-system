@@ -42,6 +42,9 @@ POSTGRES_USER=admin
 POSTGRES_PASSWORD=your_password
 POSTGRES_DB=inventory_db
 DATABASE_URL=postgresql://admin:your_password@db:5432/inventory_db
+
+# Redis — hostname matches the service name in docker-compose.yml
+REDIS_URL=redis://redis:6379
 ```
 
 > `.env` is git-ignored. Never commit it. Share credentials securely via a password manager.
@@ -101,7 +104,7 @@ docker-compose logs -f db
 ### Access the Database Shell
 
 ```bash
-docker exec -it inventory_db psql -U admin -d inventory_db
+docker exec -it inventory-system-db-1 psql -U admin -d inventory_db
 ```
 
 Useful queries:
@@ -117,17 +120,36 @@ SELECT * FROM stock_movements;  -- view ledger history
 
 ```bash
 # Backend
-docker exec -it inventory_backend bash
+docker exec -it inventory-system-backend-1 bash
 
 # Frontend (Alpine — use sh, not bash)
-docker exec -it inventory_frontend sh
+docker exec -it inventory-system-frontend-1 sh
 ```
 
 ### Verify Backend ↔ Database Connectivity
 
 ```bash
-docker exec -it inventory_backend python -c \
+docker exec -it inventory-system-backend-1 python -c \
   "import socket; print(socket.create_connection(('db', 5432)))"
+```
+
+### Inspect the Redis Cache
+
+```bash
+# Ping Redis to confirm it's alive
+docker exec -it inventory-system-redis-1 redis-cli ping
+
+# List all active cache keys
+docker exec -it inventory-system-redis-1 redis-cli KEYS "*"
+
+# Check the TTL remaining on the products cache (seconds)
+docker exec -it inventory-system-redis-1 redis-cli TTL "products:all"
+
+# Read a cached value (raw JSON)
+docker exec -it inventory-system-redis-1 redis-cli GET "products:all"
+
+# Manually flush the entire cache (forces next read to hit PostgreSQL)
+docker exec -it inventory-system-redis-1 redis-cli FLUSHALL
 ```
 
 ### Check Optimized Image Sizes
@@ -153,14 +175,16 @@ docker images | grep inventory
 ## Health Checks
 
 ```bash
-# Backend health (tests DB connectivity)
+# Backend health (tests DB + Redis connectivity)
 curl http://localhost:8000/health
+# Returns: {"status": "healthy", "database": "connected", "cache": "connected"}
 
-# Redis connectivity (once integrated)
-docker exec -it inventory_redis redis-cli ping
+# Redis ping (direct container check)
+docker exec -it inventory-system-redis-1 redis-cli ping
+# Expected: PONG
 
 # PostgreSQL readiness
-docker exec -it inventory_db pg_isready -U admin
+docker exec -it inventory-system-db-1 pg_isready -U admin
 ```
 
 ---

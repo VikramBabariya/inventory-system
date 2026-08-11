@@ -57,10 +57,10 @@ GROUP BY p.id, p.name, p.current_stock;
 
 | Method | Endpoint | Description |
 | :----- | :------- | :---------- |
-| `GET` | `/health` | Backend + DB connectivity check |
-| `GET` | `/products` | All products with category info |
-| `POST` | `/products/{id}/movements` | Record a SALE or RESTOCK |
-| `GET` | `/products/{id}/movements` | Full movement history for a product |
+| `GET` | `/health` | Backend + DB + Redis connectivity check |
+| `GET` | `/products` | All products with category info (cached) |
+| `POST` | `/products/{id}/movements` | Record a SALE or RESTOCK (invalidates cache) |
+| `GET` | `/products/{id}/movements` | Full movement history for a product (cached) |
 
 **Example — record a sale:**
 ```bash
@@ -93,6 +93,21 @@ docker-compose logs -f db
 docker-compose -f docker-compose.prod.yml logs -f
 ```
 
+#### 🗃️ Redis Cache Inspection
+```bash
+# List all active cache keys
+docker exec -it inventory-system-redis-1 redis-cli KEYS "*"
+
+# Check TTL remaining on a key (seconds until expiry)
+docker exec -it inventory-system-redis-1 redis-cli TTL "products:all"
+
+# Read a cached value (raw JSON)
+docker exec -it inventory-system-redis-1 redis-cli GET "products:all"
+
+# Flush entire cache (forces next request to hit PostgreSQL)
+docker exec -it inventory-system-redis-1 redis-cli FLUSHALL
+```
+
 #### 🐚 Access Container Shell
 Go inside the container to check files or run commands manually.
 ```bash
@@ -122,3 +137,4 @@ docker images | grep inventory
 | **Configuration**<br>(`.env`, `docker-compose.yml`) | `docker-compose up` | Docker needs to recreate the container config (Ports, Env Vars). |
 | **Testing Prod** | `docker-compose -f docker-compose.prod.yml up --build` | Uses optimized images (No Volumes). |
 | **Database Schema**<br>(`init.sql`) | `docker-compose down -v` | The DB initialization script only runs if the volume is empty. You must wipe the volume. |
+| **Stale cache after manual DB edit** | `docker exec -it inventory-system-redis-1 redis-cli FLUSHALL` | Redis serves cached data for up to 1 hour. Flush it to force fresh reads immediately. |

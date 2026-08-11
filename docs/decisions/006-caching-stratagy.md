@@ -1,54 +1,98 @@
-ADR 006: Implementation of Redis Caching Layer
+# ADR-006: Redis Caching Layer
 
-Date: 2026-01-29 Status: Accepted
+- **Status:** Implemented
+- **Date:** 2026-01-29
+- **Implemented:** 2026-08-11
 
-Context
-Our application relies on a persistent database (Postgres/DynamoDB) as the source of truth. As user traffic increases, we are observing (or anticipating) two key issues:
+---
 
- 1. Read Latency: Repeated complex queries to the database are increasing response times.
+## Context
 
- 2. Database Load: High frequency of identical read requests (e.g., fetching user profile, product catalogs) is consuming unnecessary database resources (CPU/IOPS).
+The application relies on PostgreSQL as its source of truth. As traffic increases,
+two issues arise:
 
-We need a mechanism to offload read-heavy traffic from the primary database to improve performance and scalability.
+1. **Read Latency:** Repeated JOIN queries (products + categories) increase response times.
+2. **Database Load:** High-frequency identical reads consume unnecessary PostgreSQL CPU/IOPS.
 
+We need a mechanism to offload read-heavy traffic from the primary database.
 
-Decision
-We will implement a caching layer using Redis (Remote Dictionary Server).
+---
 
-1. Technology Choice: We selected Redis over Memcached because:
+## Decision
 
-    It supports complex data structures (Lists, Sets, Hashes) which are useful for future features (e.g., leaderboards, session store).
+Implement a caching layer using **Redis** with the **Cache-Aside (Lazy Loading)** pattern.
 
-    It offers persistence options (AOF/RDB), allowing the cache to survive restarts if necessary.
+### Technology Choice: Redis over Memcached
 
-    It is the industry standard for AWS/DevOps roles in our target market (India).
+- Supports complex data structures (Lists, Sets, Hashes) useful for future features
+- Industry standard for cloud-native and data-centric roles
+- Official ARM64 image available — compatible with the OCI Ampere A1 deployment target
 
-2. Placement & Networking:
+### Placement & Networking
 
-    The Redis container will be placed on the private backend network alongside the Database.
+- Redis container runs on the private `backend-tier` Docker network
+- No ports exposed to the host or public internet
+- Accessible only by the backend service via internal Docker DNS (`redis:6379`)
 
-    It will not expose ports to the host machine or the public internet. Access is restricted strictly to the Backend Service via internal Docker DNS.
+### Caching Pattern: Cache-Aside
 
-3. Caching Pattern:
-    We will use the Cache-Aside (Lazy Loading) pattern.
-    
-    Flow: App checks Redis --> If present (HIT), return data. --> If missing (MISS), fetch from DB, write to Redis, then return data.
-    
-    TTL (Time To Live): All cache keys must have a default TTL (e.g., 3600 seconds) to prevent stale data accumulation.
+```
+Request arrives
+    │
+    ▼
+Check Redis (cache_get)
+    │
+    ├── HIT  → return cached JSON immediately (no DB query)
+    │
+    └── MISS → query PostgreSQL → store result in Redis (cache_set) → return result
+```
 
-Consequences
+On writes (`POST /products/{id}/movements`):
+- Write to PostgreSQL first (source of truth)
+- On commit success, delete affected cache keys (cache invalidation)
+- Next read repopulates the cache from fresh DB data
 
-Positive:
-    Performance: Data retrieval for cached items reduces from milliseconds (disk) to microseconds (memory).
+### Implementation
 
-    Cost Efficiency: Reduces the read throughput required on the primary database, potentially lowering costs for managed databases (e.g., DynamoDB RCUs).
+All caching logic lives in `backend/cache.py`:
 
-    Scalability: The application can handle significantly higher concurrent traffic spikes.
+| Symbol | Purpose |
+|---|---|
+| `get_cache()` | FastAPI dependency — injects Redis client into route handlers |
+| `cache_get(cache, key)` | Read a JSON value from cache; returns `None` on MISS or error |
+| `cache_set(cache, key, value)` | Write a JSON value with TTL; silent on error |
+| `cache_delete(cache, *keys)` | Invalidate one or more keys; silent on error |
+| `CACHE_TTL` | 3600 seconds (1 hour) — default TTL for all keys |
+| `PRODUCTS_ALL_KEY` | `"products:all"` — full product list with categories |
+| `movements_key(id)` | `"movements:{id}"` — movement history per product |
 
-Negative:
+### Endpoints and Cache Behaviour
 
-    Complexity: Introduces a new infrastructure component to manage and monitor.
+| Endpoint | Cache action | Key(s) affected |
+|---|---|---|
+| `GET /products` | Read → MISS → populate | `products:all` |
+| `GET /products/{id}/movements` | Read → MISS → populate | `movements:{id}` |
+| `POST /products/{id}/movements` | Invalidate on write | `products:all`, `movements:{id}` |
+| `GET /health` | Reports Redis status | — |
 
-    Consistency: We introduce Eventual Consistency. There is a risk that data in the cache is "stale" if the database is updated but the cache is not invalidated immediately.
+### Graceful Degradation
 
-    Memory limits: Redis stores data in RAM. If the dataset grows beyond available memory, we must implement eviction policies (e.g., LRU - Least Recently Used).
+If Redis is unavailable at any point, the application falls back to PostgreSQL
+transparently. Cache errors are logged as warnings and never propagate as HTTP errors.
+This is enforced in all three helpers (`cache_get`, `cache_set`, `cache_delete`) via
+`try/except redis.RedisError`.
+
+---
+
+## Consequences
+
+### Positive
+- Repeated dashboard loads served from memory (~microseconds vs ~milliseconds)
+- PostgreSQL query load reduced on read-heavy traffic
+- Cache state visible via `redis-cli KEYS "*"` for easy debugging
+
+### Negative
+- **Eventual consistency:** Up to 1 hour of stale data if cache invalidation fails silently
+- **Ephemeral cache:** Redis restart wipes all cached data (acceptable — cache is not source of truth)
+- **Complexity:** One additional infrastructure component to operate and monitor
+- **Memory:** All cached values live in RAM; large datasets require eviction policy tuning (current dataset is tiny)
