@@ -1,0 +1,17 @@
+# Frontend NodePort Service
+# Exposes the React/Nginx frontend on port 80 via NodePort for external access
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: inventory
+  labels:
+    app: inventory-frontend
+    component: frontend
+spec:
+  type: NodePort
+  ports:
+  - port: 80
+    targetPort: 80
+  selector:
+    app: inventory-frontend
