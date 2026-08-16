@@ -2,11 +2,11 @@
 
 ## Overview
 
-This document describes the technical design for migrating the inventory management system from Docker Compose to Kubernetes. The application stack (FastAPI backend, React/Nginx frontend, PostgreSQL 15, Redis) and all existing Dockerfiles are unchanged. The migration targets a single-node k3s cluster on Oracle Cloud Infrastructure (OCI) Always Free Tier (VM.Standard.A1.Flex, ARM64), provisioned via Terraform. All Kubernetes resources live in the `inventory` namespace.
+This document describes the technical design for migrating the inventory management system from Docker Compose to Kubernetes. The application stack (FastAPI backend, React/Nginx frontend, PostgreSQL 15, Redis) and all existing Dockerfiles are unchanged. The migration targets a single-node k3s cluster on Oracle Cloud Infrastructure (OCI) Always Free Tier (VM.Standard.A1.Flex, ARM64), provisioned manually via OCI console/CLI. All Kubernetes resources live in the `inventory` namespace.
 
 The migration is structured in three phases:
 - **Phase 1** — Author and validate all manifests against a local k3d cluster using x86_64 images.
-- **Phase 2** — Provision OCI infrastructure with Terraform, build and push linux/arm64 images to ghcr.io.
+- **Phase 2** — Manually provision OCI infrastructure and build/push linux/arm64 images to ghcr.io.
 - **Phase 3** — Apply manifests to the OCI k3s cluster and verify end-to-end connectivity at the public IP.
 
 CI/CD, TLS, custom domains, and monitoring are explicitly out of scope.
@@ -79,7 +79,7 @@ graph TD
 
 ### Traffic Flow
 
-1. A browser hits the OCI VM's public IP on port 80. The OCI VCN Security List (Terraform-managed) allows TCP/80 from `0.0.0.0/0`. The OS iptables rule (applied manually) forwards it into the cluster.
+1. A browser hits the OCI VM's public IP on port 80. The OCI VCN Security List (configured manually via OCI console or CLI) allows TCP/80 from `0.0.0.0/0`. The OS iptables rule (applied manually) forwards it into the cluster.
 2. The `frontend` NodePort Service routes traffic to the Frontend Pod's Nginx on port 80.
 3. Nginx serves compiled React static assets for all non-API paths.
 4. For `GET /api/*` requests, Nginx strips the `/api` prefix and proxies to the `backend` ClusterIP Service on port 8000.
@@ -92,7 +92,7 @@ graph TD
 Internet
     │
     ▼
-OCI VCN Security List  (Terraform-managed)
+OCI VCN Security List  (Manually configured)
   Allow TCP 22   from 0.0.0.0/0        ← SSH
   Allow TCP 80   from 0.0.0.0/0        ← HTTP / NodePort
   Allow TCP 6443 from <operator_cidr>  ← k3s API
@@ -126,9 +126,10 @@ sequenceDiagram
     Dev->>k3d: curl localhost:80 → HTTP 200 ✓
     Dev->>k3d: k3d cluster delete
 
-    Note over Dev,OCI: Phase 2 — OCI Provisioning + ARM64 Images
-    Dev->>OCI: terraform init && terraform apply
-    OCI-->>Dev: vm_public_ip output
+    Note over Dev,OCI: Phase 2 — Manual OCI Provisioning + ARM64 Images
+    Dev->>OCI: Manual VCN creation via OCI console
+    Dev->>OCI: Manual VM provisioning (VM.Standard.A1.Flex)
+    Dev->>OCI: Manual Security List configuration
     Dev->>OCI: SSH → install k3s (pinned version)
     Dev->>Dev: docker buildx build --platform linux/arm64 backend
     Dev->>Dev: docker buildx build --platform linux/arm64 frontend (VITE_API_URL=OCI_IP)
@@ -237,15 +238,18 @@ The init container replaces Docker Compose's `depends_on: condition: service_hea
 
 The embedded `nginx.conf` proxies `/api/` paths to `http://backend:8000/`, resolving via in-cluster DNS. The proxy strips the `/api` prefix so the FastAPI backend receives requests at their native paths (e.g., `/products`, `/health`).
 
-### Terraform Resources
+### OCI Manual Provisioning Steps
 
-| File | Purpose |
-|---|---|
-| `main.tf` | VCN, subnet, VM instance (VM.Standard.A1.Flex, 2 OCPUs, 12 GB), reserved public IP |
-| `variables.tf` | Input vars: `region`, `instance_image_ocid`, `operator_cidr`, `reserve_public_ip`, `ssh_public_key` |
-| `outputs.tf` | Output: `vm_public_ip` |
-| `security.tf` | VCN Security List ingress rules: TCP 22 from `0.0.0.0/0`, TCP 80 from `0.0.0.0/0`, TCP 6443 from `operator_cidr` |
-| `terraform.tfvars.example` | Template with all five variable stubs and inline comments |
+The following OCI resources are provisioned manually via the OCI console or CLI in Phase 2. Terraform automation for these steps is recorded as a future enhancement.
+
+| Resource | Specification | Notes |
+|---|---|---|
+| VCN | CIDR `10.0.0.0/16` | Created via OCI console → Networking → Virtual Cloud Networks |
+| Public Subnet | CIDR `10.0.1.0/24` | Created inside the VCN; used for the VM |
+| Security List | Ingress: TCP 22, 80 from `0.0.0.0/0`; TCP 6443 from operator CIDR | Applied to the public subnet |
+| VM Instance | `VM.Standard.A1.Flex`, 2 OCPUs, 12 GB RAM, ARM64 OS image | Oracle Linux 8 or Ubuntu 22.04 ARM64 |
+| Reserved Public IP | Optional but recommended | Ensures IP persists across VM reboots |
+| SSH Key | RSA or ECDSA public key | Generated locally; uploaded during VM creation |
 
 ---
 
@@ -300,13 +304,6 @@ k8s/
 ├── deployment-frontend.yaml         # Deployment: inventory-frontend + readiness probe
 └── service-frontend.yaml            # NodePort Service: frontend :80
 
-terraform/
-├── main.tf                          # VCN, subnet, VM instance, public IP
-├── variables.tf                     # region, instance_image_ocid, operator_cidr, reserve_public_ip, ssh_public_key
-├── outputs.tf                       # vm_public_ip output
-├── security.tf                      # VCN Security List ingress rules
-└── terraform.tfvars.example         # Template for variable values
-
 docs/
 ├── archive/                         # Moved AWS-era docs
 │   └── README.md                    # Archive context note
@@ -314,11 +311,12 @@ docs/
 │   ├── 010-nodeport-nginx-ingress.md
 │   ├── 011-pvc-persistence-node-affinity.md
 │   ├── 012-manual-secret-bootstrap.md
-│   ├── 013-oci-dual-firewall.md
-│   ├── 014-init-sql-configmap.md
-│   └── 015-unset-storageclassname.md
+│   ├── 013-manual-oci-provisioning.md
+│   ├── 014-oci-dual-firewall.md
+│   ├── 015-init-sql-configmap.md
+│   └── 016-unset-storageclassname.md
 ├── runbooks/
-│   ├── oci-terraform-setup.md
+│   ├── oci-manual-setup.md          # Manual OCI provisioning + k3s install
 │   ├── k8s-operations.md
 │   └── local-k3d-dev.md
 └── backlog.md
@@ -340,7 +338,7 @@ The schema is defined in `db_init/init.sql` and is not modified. It is mounted v
 
 *A property is a characteristic or behavior that should hold true across all valid executions of a system — essentially, a formal statement about what the system should do. Properties serve as the bridge between human-readable specifications and machine-verifiable correctness guarantees.*
 
-This feature is primarily Infrastructure as Code (Kubernetes manifests and Terraform HCL) and build-process tooling. The prework analysis classified the vast majority of acceptance criteria as SMOKE or INTEGRATION checks — they verify one-time configuration or external service behavior and are not suitable for property-based testing.
+This feature is primarily Infrastructure as Code (Kubernetes manifests) and operational process (runbooks, ADRs). The prework analysis classified the vast majority of acceptance criteria as SMOKE or INTEGRATION checks — they verify one-time configuration or external service behavior and are not suitable for property-based testing.
 
 After reflection, six testable properties were identified across the manifest corpus. Properties 1 and 2 were consolidated (all probe spec conformance across all three probed deployments is a single universal property). Properties 4 and 5 were consolidated (all secret references across all manifests is a single universal property). The remaining properties each provide unique validation value.
 
@@ -413,14 +411,14 @@ Specifically:
 | Backend | Liveness | kubelet restarts pod after 3 consecutive failures × 20s period = 60s |
 | Frontend | Readiness | Removed from `frontend` Service endpoints; NodePort returns connection refused |
 
-### Terraform Error Handling
+### OCI Manual Provisioning Errors
 
 | Error | Cause | Resolution |
 |---|---|---|
-| VCN CIDR conflict on `apply` | `10.0.0.0/16` already exists in tenancy | Change CIDR in `variables.tf` |
-| VM shape unavailable | `VM.Standard.A1.Flex` capacity exhausted in Availability Domain | Retry in a different AD |
-| Second `apply` not idempotent | Provider drift or manual OCI console changes | Run `terraform refresh` then `terraform plan` to inspect drift |
-| SSH key not accepted | Wrong key format for OCI | Use RSA or ECDSA public key; paste the full key string |
+| VCN CIDR conflict | `10.0.0.0/16` already exists in tenancy | Choose a different CIDR (e.g. `10.1.0.0/16`) in the OCI console |
+| VM shape unavailable | `VM.Standard.A1.Flex` capacity exhausted in Availability Domain | Retry in a different AD; OCI Sometimes requires waiting for capacity |
+| SSH key not accepted | Wrong key format for OCI | Use RSA or ECDSA public key; paste the full public key string including the `ssh-rsa` or `ecdsa` prefix |
+| Port not reachable after Security List update | OS iptables blocking inbound traffic | Verify and add `iptables` rules on the VM; check `sudo iptables -L INPUT` |
 
 ### Image Architecture Mismatch
 
@@ -436,7 +434,7 @@ If a pod shows `exec format error` in `kubectl logs <pod> -n inventory`, the ima
 
 ### PBT Applicability Assessment
 
-This feature is dominated by IaC (Kubernetes manifests, Terraform HCL) and operational process (runbooks, ADRs). The prework analysis identified six testable properties, described above. The primary test tool is YAML parsing via `PyYAML` (already in the project's Python ecosystem) rather than a full PBT framework with random input generation — because most properties are universal checks over a finite, static corpus of files.
+This feature is primarily Infrastructure as Code (Kubernetes manifests) and operational process (runbooks, ADRs). The prework analysis identified six testable properties, described above. The primary test tool is YAML parsing via `PyYAML` (already in the project's Python ecosystem) rather than a full PBT framework with random input generation — because most properties are universal checks over a finite, static corpus of files.
 
 One property (Property 5: Nginx prefix stripping) benefits from input generation. For the remainder, the "for all" quantification is over the finite set of k8s manifest files, making them exhaustive checks that are still correctly expressed as universal properties.
 
@@ -535,18 +533,22 @@ kubectl get pods -n inventory --watch
 curl http://<OCI_PUBLIC_IP>:80/api/products  # data must still be present
 ```
 
-### Terraform Validation
+### OCI Infrastructure Verification
 
 ```bash
-# Syntax and schema check
-terraform validate
+# Verify VM is reachable via SSH
+ssh -i ~/.ssh/oci_key opc@<OCI_PUBLIC_IP>
 
-# Dry-run: inspect planned resources
-terraform plan -out=tfplan
+# Verify k3s is running on the VM
+sudo systemctl status k3s
 
-# Idempotency check: second plan must show 0 changes
-terraform apply tfplan
-terraform plan  # must output: No changes. Your infrastructure matches the configuration.
+# Verify Security List ports are open (run from outside the VM)
+nc -zv <OCI_PUBLIC_IP> 22   # SSH
+nc -zv <OCI_PUBLIC_IP> 80   # HTTP
+nc -zv <OCI_PUBLIC_IP> 6443 # k3s API
+
+# Verify iptables rules on the VM
+sudo iptables -L INPUT --line-numbers
 ```
 
 ---

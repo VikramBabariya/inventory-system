@@ -2,7 +2,7 @@
 
 ## Introduction
 
-This document covers the migration of the inventory management system from Docker Compose to Kubernetes. The migration is structured in three phases: (1) author and validate all Kubernetes manifests against a local k3d cluster, (2) provision Oracle Cloud Infrastructure (OCI) and build ARM64 images, and (3) deploy to the production k3s cluster on OCI. CI/CD, TLS, custom domains, and monitoring are explicitly out of scope for this phase.
+This document covers the migration of the inventory management system from Docker Compose to Kubernetes. The migration is structured in three phases: (1) author and validate all Kubernetes manifests against a local k3d cluster, (2) provision Oracle Cloud Infrastructure (OCI) manually and build ARM64 images, and (3) deploy to the production k3s cluster on OCI. CI/CD, TLS, custom domains, Terraform automation, and monitoring are explicitly out of scope for this phase.
 
 The existing application stack (FastAPI backend, React/Nginx frontend, PostgreSQL 15, Redis) and all existing Dockerfiles remain unchanged. The migration targets a single-node k3s cluster on OCI Always Free Tier (VM.Standard.A1.Flex, ARM64).
 
@@ -26,7 +26,8 @@ The existing application stack (FastAPI backend, React/Nginx frontend, PostgreSQ
 - **ClusterIP**: A Kubernetes Service type for internal-only cluster communication, used for backend, database, and Redis.
 - **OCI**: Oracle Cloud Infrastructure — the target cloud platform.
 - **VCN**: Virtual Cloud Network — OCI's virtual private network construct.
-- **Terraform**: Infrastructure-as-code tool used to provision OCI resources (VM, VCN, Security Lists).
+- **OCI_Console**: The web-based Oracle Cloud Infrastructure management interface used for manual resource provisioning.
+- **OCI_CLI**: The Oracle Cloud Infrastructure command-line interface used for scripted resource management.
 - **ghcr.io**: GitHub Container Registry, the image registry used for all container images.
 - **git_SHA**: The full Git commit hash used as the image tag for traceability.
 - **ARM64**: The CPU architecture of the OCI VM (VM.Standard.A1.Flex). Images built for OCI must target `linux/arm64`.
@@ -159,20 +160,20 @@ The existing application stack (FastAPI backend, React/Nginx frontend, PostgreSQ
 
 ---
 
-### Requirement 9: Phase 2 — OCI Infrastructure Provisioning with Terraform
+### Requirement 9: Phase 2 — Manual OCI Infrastructure Provisioning
 
-**User Story:** As an infrastructure engineer, I want Terraform to provision all required OCI resources, so that the production environment is reproducible and version-controlled.
+**User Story:** As an infrastructure engineer, I want to manually provision all required OCI resources using the OCI console and CLI, so that I can gain hands-on experience with cloud infrastructure before automating it later.
 
 #### Acceptance Criteria
 
-1. THE Terraform configuration SHALL provision a VCN with CIDR `10.0.0.0/16` and a public subnet with CIDR `10.0.1.0/24`, configured via a required input variable `region`.
-2. THE Terraform configuration SHALL provision a VM instance of shape `VM.Standard.A1.Flex` with 2 OCPUs and 12 GB RAM, using an OS image specified via a required input variable `instance_image_ocid` (must be ARM64-compatible).
-3. THE Terraform configuration SHALL configure OCI VCN Security List ingress rules to allow TCP traffic on port 22 (SSH) and port 80 (HTTP/NodePort) from `0.0.0.0/0`, and port 6443 (k3s API) restricted to the CIDR specified via a required input variable `operator_cidr`.
-4. WHERE the operator sets the `reserve_public_ip` input variable to `true`, THE Terraform configuration SHALL attach a reserved public IP to the VM instance so the IP persists across VM reboots.
-5. THE Runbook SHALL document the exact `iptables` commands to open ports 80 and 6443 on the OCI VM's OS firewall, as a complement to the Terraform-managed VCN Security List.
-6. THE Terraform configuration SHALL output the VM's public IP address as `vm_public_ip` so it can be used in subsequent deployment steps.
-7. THE Runbook SHALL document the k3s single-node installation command (pinned to a specific version using the `INSTALL_K3S_VERSION` environment variable, with `--write-kubeconfig-mode 644`) to be run on the provisioned VM after Terraform completes.
-8. WHEN Terraform is applied a second time with no variable changes, THE Terraform configuration SHALL produce a plan with zero additions, zero changes, and zero destructions.
+1. THE Runbook SHALL document the manual creation of a VCN with CIDR `10.0.0.0/16` and a public subnet with CIDR `10.0.1.0/24` using the OCI console or CLI.
+2. THE Runbook SHALL document the manual provisioning of a VM instance of shape `VM.Standard.A1.Flex` with 2 OCPUs and 12 GB RAM, using an ARM64-compatible OS image (Oracle Linux 8 or Ubuntu 22.04 ARM64).
+3. THE Runbook SHALL document the manual configuration of VCN Security List ingress rules to allow TCP traffic on port 22 (SSH) and port 80 (HTTP/NodePort) from `0.0.0.0/0`, and port 6443 (k3s API) restricted to a specific operator IP/CIDR.
+4. THE Runbook SHALL document the optional reservation of a public IP address and its attachment to the VM instance so the IP persists across VM reboots.
+5. THE Runbook SHALL document the exact `iptables` commands to open ports 80 and 6443 on the OCI VM's OS firewall, as a complement to the manually configured VCN Security List.
+6. THE Runbook SHALL document how to obtain the VM's public IP address from the OCI console so it can be used in subsequent deployment steps.
+7. THE Runbook SHALL document the k3s single-node installation command (pinned to a specific version using the `INSTALL_K3S_VERSION` environment variable, with `--write-kubeconfig-mode 644`) to be run on the provisioned VM.
+8. THE Runbook SHALL document the SSH key generation and upload process for secure access to the VM instance.
 
 ---
 
@@ -224,9 +225,9 @@ The existing application stack (FastAPI backend, React/Nginx frontend, PostgreSQ
 
 #### Acceptance Criteria
 
-1. THE migration SHALL produce exactly six ADR files numbered 010 through 015, placed in `docs/decisions/`, one ADR per decision from the Decisions Already Made section of the project brief.
+1. THE migration SHALL produce exactly seven ADR files numbered 010 through 016, placed in `docs/decisions/`, one ADR per decision from the Decisions Already Made section of the project brief.
 2. EACH ADR SHALL contain the following sections with non-empty content: **Status** (value: "Accepted"), **Context** (describing the problem and the phase/deployment context that drove the decision), **Decision** (stating what was decided), and **Consequences** (listing at least one positive consequence and at least one negative consequence or trade-off).
-3. THE six ADRs SHALL map to decisions as follows: ADR 010 → NodePort + embedded Nginx ingress strategy; ADR 011 → k3s local-path PVC persistence with node affinity; ADR 012 → manual `kubectl` secret bootstrapping; ADR 013 → OCI dual-firewall networking (VCN Security List + OS iptables); ADR 014 → `init.sql` ConfigMap mounting; ADR 015 → unset `storageClassName` for portability.
+3. THE seven ADRs SHALL map to decisions as follows: ADR 010 → NodePort + embedded Nginx ingress strategy; ADR 011 → k3s local-path PVC persistence with node affinity; ADR 012 → manual `kubectl` secret bootstrapping; ADR 013 → manual OCI provisioning over Terraform; ADR 014 → OCI dual-firewall networking (VCN Security List + OS iptables); ADR 015 → `init.sql` ConfigMap mounting; ADR 016 → unset `storageClassName` for portability.
 
 ---
 
@@ -236,7 +237,7 @@ The existing application stack (FastAPI backend, React/Nginx frontend, PostgreSQ
 
 #### Acceptance Criteria
 
-1. THE migration SHALL produce a runbook at `docs/runbooks/oci-terraform-setup.md` covering: OCI account prerequisites (tenancy OCID, user OCID, API key fingerprint, private key path), Terraform variable configuration, `terraform init` / `plan` / `apply` steps, k3s installation via the official install script (`https://get.k3s.io`) pinned to a specific version, and `iptables` commands to open TCP ports 22, 80, and 6443 on the OCI VM's OS firewall.
+1. THE migration SHALL produce a runbook at `docs/runbooks/oci-manual-setup.md` covering: OCI account prerequisites (tenancy OCID, compartment OCID, SSH key generation and upload), manual VCN and subnet creation via OCI console or CLI, VM instance provisioning (VM.Standard.A1.Flex, ARM64), Security List ingress rule configuration, optional reserved public IP attachment, k3s installation via the official install script (`https://get.k3s.io`) pinned to a specific version, and `iptables` commands to open TCP ports 22, 80, and 6443 on the OCI VM's OS firewall.
 2. THE migration SHALL produce a runbook at `docs/runbooks/k8s-operations.md` covering: secret bootstrapping commands, `kubectl apply` workflow, pod status verification, log access, and at minimum the following debugging commands: `kubectl exec -it <pod> -n inventory -- <shell>`, `kubectl get endpoints -n inventory`, and `kubectl get events -n inventory --sort-by=.lastTimestamp`.
 3. THE migration SHALL produce a runbook at `docs/runbooks/local-k3d-dev.md` covering: k3d cluster creation, local image loading, manifest application, port-forwarding to expose the frontend at `localhost:8080` (verified by `curl http://localhost:8080` returning HTTP 200), and cluster teardown.
 4. EACH runbook SHALL format every command block with a preceding `#` comment line explaining the purpose of the command.
@@ -252,7 +253,7 @@ The existing application stack (FastAPI backend, React/Nginx frontend, PostgreSQ
 
 1. THE `docs/architecture/hld/system-architecture.md` SHALL be updated to include a Kubernetes network topology diagram showing: the `inventory` namespace containing the `inventory-backend` pod (port 8000), `inventory-frontend` pod (port 80), `inventory-db` pod (port 5432), and `inventory-redis` pod (port 6379); the four corresponding Services (`backend` ClusterIP, `postgres` ClusterIP, `redis` ClusterIP, and `frontend` NodePort on port 80); and the external access path from the internet to the NodePort Service.
 2. THE `docs/architecture/concepts/environments.md` SHALL be updated to add a third environment column "Kubernetes/OCI" alongside the existing "Dev (Docker Compose)" and "Prod (Docker Compose)" columns, covering all existing rows: runtime, image source, database persistence, secret management, network exposure, and hot-reload behaviour.
-3. THE `docs/security.md` SHALL be updated to document: (a) the Kubernetes secrets model — manual bootstrap via `kubectl create secret`, `secretKeyRef` references in manifests, no credentials in committed files; and (b) the dual OCI firewall layers — the VCN Security List (managed by Terraform, opening ports 22, 80, and 6443) and the OS iptables rules (applied manually on the VM, opening ports 80 and 6443).
+3. THE `docs/security.md` SHALL be updated to document: (a) the Kubernetes secrets model — manual bootstrap via `kubectl create secret`, `secretKeyRef` references in manifests, no credentials in committed files; and (b) the dual OCI firewall layers — the VCN Security List (configured manually via OCI console or CLI, opening ports 22, 80, and 6443) and the OS iptables rules (applied manually on the VM, opening ports 80 and 6443).
 
 ---
 
@@ -262,9 +263,9 @@ The existing application stack (FastAPI backend, React/Nginx frontend, PostgreSQ
 
 #### Acceptance Criteria
 
-1. THE migration SHALL produce a file at `docs/backlog.md` listing all out-of-scope future tasks under three priority tiers — High, Medium, and Low — covering: CI/CD (GitHub Actions), TLS/HTTPS (cert-manager + Let's Encrypt), domain attachment, Alembic migrations, Traefik ingress, CORS hardening, resource tuning, vulnerability scanning, Prometheus + Grafana monitoring, Horizontal Pod Autoscaler, and multi-node k3s.
+1. THE migration SHALL produce a file at `docs/backlog.md` listing all out-of-scope future tasks under three priority tiers — High, Medium, and Low — covering: Terraform infrastructure automation, CI/CD (GitHub Actions), TLS/HTTPS (cert-manager + Let's Encrypt), domain attachment, Alembic migrations, Traefik ingress, CORS hardening, resource tuning, vulnerability scanning, Prometheus + Grafana monitoring, Horizontal Pod Autoscaler, and multi-node k3s.
 2. THE `docs/backlog.md` file SHALL include for each task: a one-sentence description of what it involves and a one-sentence explanation of why it is deferred (scope, dependency, or complexity).
-3. THE `docs/backlog.md` file SHALL contain entries for all eleven tasks listed in criterion 1; a tester can verify completeness by confirming all eleven task names are present.
+3. THE `docs/backlog.md` file SHALL contain entries for all twelve tasks listed in criterion 1; a tester can verify completeness by confirming all twelve task names are present.
 
 ---
 
@@ -274,6 +275,7 @@ The existing application stack (FastAPI backend, React/Nginx frontend, PostgreSQ
 
 | Task | Description | Reason Deferred |
 |---|---|---|
+| Terraform Infrastructure Automation | Automate OCI resource provisioning (VCN, Security Lists, VM, public IP) using Terraform HCL for reproducible infrastructure-as-code. | Manual provisioning provides hands-on learning experience with OCI; automation deferred until infrastructure requirements are validated. |
 | CI/CD (GitHub Actions) | Automate ARM64 image build, push to ghcr.io on merge to main, and `kubectl apply` via self-hosted runner on the OCI VM. | Requires kubeconfig access strategy; manual deploy is sufficient for Phase 1–3. |
 | TLS/HTTPS | cert-manager + Let's Encrypt once a domain is attached; switch ingress from NodePort to Traefik. | No domain in this phase; raw public IP access is sufficient. |
 | Domain | Attach a domain to the OCI reserved public IP (free on Always Free Tier). | Out of scope for initial Kubernetes migration. |

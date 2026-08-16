@@ -208,69 +208,63 @@ All implementation is ordered so that each step produces artefacts consumed by t
 
 ---
 
-### Phase 2 — OCI Infrastructure and ARM64 Images
+### Phase 2 — Manual OCI Infrastructure and ARM64 Images
 
-- [ ] 14. Create Terraform variables file
-  - Create `terraform/variables.tf` declaring five input variables:
-    - `region` (string, required) — OCI region identifier
-    - `instance_image_ocid` (string, required) — ARM64-compatible OS image OCID
-    - `operator_cidr` (string, required) — CIDR allowed to reach k3s API on port 6443
-    - `reserve_public_ip` (bool, default false) — whether to attach a reserved (persistent) public IP
-    - `ssh_public_key` (string, required) — public key to inject into the VM
-  - Each variable must include a `description` field
-  - _Requirements: 9.1, 9.2, 9.3, 9.4_
+- [x] 14. Create manual OCI provisioning runbook
+  - Create `docs/runbooks/oci-manual-setup.md` with step-by-step instructions for:
+    - OCI account prerequisites (tenancy OCID, user OCID, compartment setup)
+    - SSH key generation and upload to OCI
+    - Manual VCN creation with CIDR `10.0.0.0/16` via OCI console
+    - Public subnet creation with CIDR `10.0.1.0/24`
+    - Security List configuration: TCP 22 from `0.0.0.0/0`, TCP 80 from `0.0.0.0/0`, TCP 6443 from operator IP
+    - VM instance creation: shape `VM.Standard.A1.Flex`, 2 OCPUs, 12 GB RAM, ARM64-compatible image
+    - Optional: reserved public IP creation and attachment
+  - Each command block must be preceded by a `#` comment line explaining the purpose
+  - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.6, 9.8_
 
-- [ ] 15. Create Terraform main configuration
-  - Create `terraform/main.tf` with:
-    - OCI provider block (region from variable)
-    - VCN resource with CIDR `10.0.0.0/16`
-    - Public subnet resource with CIDR `10.0.1.0/24`
-    - `oci_core_instance` resource: shape `VM.Standard.A1.Flex`, 2 OCPUs, 12 GB RAM, image from `instance_image_ocid` variable, SSH key from `ssh_public_key` variable, placed in the public subnet
-    - Conditional reserved public IP: `count = var.reserve_public_ip ? 1 : 0`
-    - Public IP association resource (also conditional)
-  - _Requirements: 9.1, 9.2, 9.4_
+- [ ] 15. Document k3s installation process
+  - Add to `docs/runbooks/oci-manual-setup.md`:
+    - SSH connection to the VM using generated key
+    - k3s installation command: `curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=<pinned> sh -s - --write-kubeconfig-mode 644`
+    - iptables commands to open TCP 80 and 6443 on the VM's OS firewall
+    - Verification commands: `kubectl get nodes`, `systemctl status k3s`
+  - _Requirements: 9.5, 9.7_
 
-- [ ] 16. Create Terraform security configuration
-  - Create `terraform/security.tf` with OCI VCN Security List ingress rules:
-    - TCP port 22 from `0.0.0.0/0` (SSH)
-    - TCP port 80 from `0.0.0.0/0` (HTTP / NodePort)
-    - TCP port 6443 from `var.operator_cidr` (k3s API)
-  - Egress: allow all traffic (stateless egress)
-  - Associate the Security List with the subnet defined in `main.tf`
-  - _Requirements: 9.3_
+- [ ] 16. Build and push ARM64 backend image
+  - Build ARM64 backend image: `docker buildx build --platform linux/arm64 -t ghcr.io/VikramBabariya/inventory-backend:<git_SHA> ./backend`
+  - Push to registry: `docker push ghcr.io/VikramBabariya/inventory-backend:<git_SHA>`
+  - Verify ARM64 manifest: `docker manifest inspect ghcr.io/VikramBabariya/inventory-backend:<git_SHA>`
+  - _Requirements: 10.1, 10.2, 10.3, 10.6, 10.7_
 
-- [ ] 17. Create Terraform outputs file
-  - Create `terraform/outputs.tf` with a single output `vm_public_ip`
-  - Value: the VM instance's public IP; if `reserve_public_ip` is true, use the reserved IP resource; else use `oci_core_instance.public_ip`
-  - _Requirements: 9.6_
+- [ ] 17. Build and push ARM64 frontend image  
+  - Build ARM64 frontend with OCI API URL: `docker buildx build --platform linux/arm64 --build-arg VITE_API_URL=http://<OCI_PUBLIC_IP>:8000 -t ghcr.io/VikramBabariya/inventory-frontend:<git_SHA> ./frontend`
+  - Push to registry: `docker push ghcr.io/VikramBabariya/inventory-frontend:<git_SHA>`
+  - Verify ARM64 manifest: `docker manifest inspect ghcr.io/VikramBabariya/inventory-frontend:<git_SHA>`
+  - _Requirements: 10.1, 10.2, 10.3, 10.6, 10.7_
 
-- [ ] 18. Create Terraform example variables file
-  - Create `terraform/terraform.tfvars.example` with all five variable stubs
-  - Include inline comments on each line explaining the expected value format
-  - Example stub format: `region = "# e.g. uk-london-1"`
-  - _Requirements: 9.1, 9.2, 9.3, 9.4_
-
-- [ ] 19. Checkpoint — Terraform configuration complete
-  - Run `terraform validate` inside `terraform/` and confirm zero errors
-  - Run `terraform plan` (using stub/mock values or `-var` overrides) and confirm the plan is parseable
-  - Ask the user if any infrastructure adjustments are needed before ARM64 image tasks.
+- [ ] 18. Checkpoint — Manual OCI infrastructure and ARM64 images complete
+  - Verify VM is accessible via SSH
+  - Verify k3s is installed and running: `kubectl get nodes`
+  - Verify both ARM64 images are pushed to ghcr.io with correct manifests
+  - Document the OCI public IP for use in Phase 3
+  - Ask the user if any infrastructure or image issues need resolution before proceeding to deployment.
 
 ---
 
 ### Phase 3 — Deploy to OCI k3s
 
-- [ ] 20. Update deployment manifests with OCI node affinity
+- [ ] 19. Update deployment manifests with OCI node affinity
   - Edit `k8s/deployment-postgres.yaml`: uncomment or activate the node affinity block added in task 4
   - Set `requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions` to match `kubernetes.io/hostname` = actual OCI VM hostname (document as a `TODO:` placeholder — operator fills in after `kubectl get nodes`)
   - _Requirements: 2.7_
 
-- [ ] 21. Bootstrap inventory-secrets on the OCI k3s cluster
+- [ ] 20. Bootstrap inventory-secrets on the OCI k3s cluster
   - Document (in code comments within a helper script `scripts/bootstrap-secrets.sh`) the exact `kubectl create secret generic inventory-secrets` command with all five keys: `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `DATABASE_URL`, `REDIS_URL`
   - The script must validate that `kubectl config current-context` points to the OCI cluster before running
   - The script must check whether the secret already exists (`kubectl get secret inventory-secrets -n inventory`) and skip creation if present, printing a warning
   - _Requirements: 6.1, 6.3_
 
-- [ ] 22. Apply manifests to OCI k3s and verify pod readiness
+- [ ] 21. Apply manifests to OCI k3s and verify pod readiness
   - Document (as executable comments in `scripts/deploy-oci.sh`) the full apply sequence:
     1. Pre-flight: `docker manifest inspect` for both ARM64 images
     2. Pre-flight: `kubectl get secret inventory-secrets -n inventory` — all five keys present
@@ -282,11 +276,45 @@ All implementation is ordered so that each step produces artefacts consumed by t
     - `kubectl get events -n inventory --sort-by=.lastTimestamp`
   - _Requirements: 11.1, 11.2, 11.3_
 
-- [ ] 23. Checkpoint — OCI deployment complete
+- [ ] 22. Checkpoint — OCI deployment complete
   - Ensure all four pods are `Running`: `kubectl get pods -n inventory`
   - Verify public IP access: `curl -I http://<OCI_PUBLIC_IP>:80` returns HTTP 200
   - Verify API health: `curl http://<OCI_PUBLIC_IP>:80/api/health` returns `{"status":"healthy","database":"connected","cache":"connected"}`
+  - **CRITICAL**: Set up idle prevention immediately (see `docs/oci-idle-prevention-cheatsheet.md`)
   - Ask the user if any deployment issues need resolution before proceeding to documentation tasks.
+
+- [ ] 22.1. Configure idle prevention measures (CRITICAL)
+  - SSH into OCI VM: `ssh -i ~/.ssh/oci_inventory_key opc@<OCI_PUBLIC_IP>`
+  - Add basic keep-alive cron jobs to prevent Oracle's 7-day idle reclamation:
+    ```bash
+    crontab -e
+    # Add these lines:
+    */10 * * * * curl -s http://localhost:8000/api/health > /dev/null 2>&1
+    */15 * * * * kubectl get pods -n inventory > /dev/null 2>&1  
+    */20 * * * * ping -c 2 8.8.8.8 > /dev/null 2>&1
+    0 * * * * timeout 60 yes > /dev/null 2>&1
+    ```
+  - Verify resource utilization stays above 20% (CPU, memory, network) using `top`, `free -h`, and basic network activity
+  - Document current baseline metrics for future monitoring
+  - _Requirements: Prevent Always Free VM reclamation per Oracle policy_
+
+- [ ] 22.2. Harden SSH security (CRITICAL)
+  - Configure SSH security on OCI VM:
+    ```bash
+    sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup
+    sudo vi /etc/ssh/sshd_config
+    # Add/modify:
+    Port 2222
+    PermitRootLogin no  
+    PasswordAuthentication no
+    MaxAuthTries 3
+    LoginGraceTime 30
+    ```
+  - Restart SSH: `sudo systemctl restart sshd`
+  - Test SSH access on new port: `ssh -i ~/.ssh/oci_inventory_key -p 2222 opc@<OCI_PUBLIC_IP>`
+  - Install fail2ban: `sudo yum install epel-release && sudo yum install fail2ban`
+  - Monitor attack attempts: `sudo tail -f /var/log/secure`
+  - _Requirements: Secure SSH access against brute force attacks_
 
 ---
 
@@ -324,35 +352,38 @@ All implementation is ordered so that each step produces artefacts consumed by t
   - Context: no CI/CD in this phase; storing secrets in manifests or `.env` committed to git is a security violation; `kubectl create secret generic` keeps credentials out of source control
   - _Requirements: 13.1, 13.2, 13.3_
 
-- [ ] 29. Create ADR 013 — OCI dual-firewall networking
-  - Create `docs/decisions/013-oci-dual-firewall.md`
+- [ ] 29. Create ADR 013 — Manual OCI provisioning over Terraform
+  - Create `docs/decisions/013-manual-oci-provisioning.md`
   - Sections: **Status** (Accepted), **Context**, **Decision**, **Consequences**
-  - Context: OCI has two independent firewall layers — VCN Security List (cloud-level, Terraform-managed) and OS iptables (VM-level, applied manually); both must allow a port for traffic to reach a pod
+  - Context: Infrastructure-as-Code with Terraform provides reproducibility but requires HCL expertise; manual provisioning provides hands-on learning experience with OCI components and faster initial deployment
+  - Decision: Provision OCI resources (VCN, VM, Security Lists) manually via console/CLI first, then automate with Terraform later
+  - Consequences: Faster learning curve, immediate progress, but manual process is not version-controlled or repeatable
   - _Requirements: 13.1, 13.2, 13.3_
 
-- [ ] 30. Create ADR 014 — init.sql ConfigMap mounting
-  - Create `docs/decisions/014-init-sql-configmap.md`
+- [ ] 30. Create ADR 014 — OCI dual-firewall networking
+  - Create `docs/decisions/014-oci-dual-firewall.md`
+  - Sections: **Status** (Accepted), **Context**, **Decision**, **Consequences**
+  - Context: OCI has two independent firewall layers — VCN Security List (cloud-level, manually configured) and OS iptables (VM-level, applied manually); both must allow a port for traffic to reach a pod
+  - _Requirements: 13.1, 13.2, 13.3_
+
+- [ ] 31. Create ADR 015 — init.sql ConfigMap mounting
+  - Create `docs/decisions/015-init-sql-configmap.md`
   - Sections: **Status** (Accepted), **Context**, **Decision**, **Consequences**
   - Context: PostgreSQL's `docker-entrypoint-initdb.d` mechanism runs scripts on first boot only; mounting via ConfigMap subPath avoids modifying the existing `init.sql` script and keeps schema initialisation declarative
   - _Requirements: 13.1, 13.2, 13.3_
 
-- [ ] 31. Create ADR 015 — unset storageClassName for portability
-  - Create `docs/decisions/015-unset-storageclassname.md`
+- [ ] 32. Create ADR 016 — unset storageClassName for portability
+  - Create `docs/decisions/016-unset-storageclassname.md`
   - Sections: **Status** (Accepted), **Context**, **Decision**, **Consequences**
   - Context: k3d uses `standard` storage class; k3s uses `local-path`; omitting `storageClassName` causes the PVC to bind to the cluster default, making the manifest portable across both environments without modification
   - _Requirements: 13.1, 13.2, 13.3_
 
-- [ ] 32. Create OCI Terraform setup runbook
-  - Create `docs/runbooks/oci-terraform-setup.md`
-  - Must cover (each command block preceded by a `#` comment line):
-    - OCI account prerequisites: tenancy OCID, user OCID, API key fingerprint, private key path
-    - Terraform variable configuration (`terraform.tfvars` setup from example)
-    - `terraform init`, `terraform plan`, `terraform apply` steps
-    - k3s installation command: `curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=<pinned> sh -s - --write-kubeconfig-mode 644`
-    - iptables commands to open TCP 22, 80, and 6443 on the OCI VM's OS firewall
+- [ ] 33. Update OCI manual setup runbook (completed in task 14)
+  - Verify `docs/runbooks/oci-manual-setup.md` covers all manual provisioning steps
+  - Ensure each command block is preceded by a `#` comment line explaining the purpose
   - _Requirements: 9.5, 9.7, 14.1_
 
-- [ ] 33. Create Kubernetes operations runbook
+- [ ] 34. Create Kubernetes operations runbook
   - Create `docs/runbooks/k8s-operations.md`
   - Must cover (each command block preceded by a `#` comment line):
     - Secret bootstrapping: the exact `kubectl create secret generic inventory-secrets` command with all five keys
@@ -364,7 +395,7 @@ All implementation is ordered so that each step produces artefacts consumed by t
     - ARM64 pre-flight: `docker manifest inspect` commands for both images
   - _Requirements: 6.1, 6.4, 11.1, 14.2_
 
-- [ ] 34. Create local k3d development runbook
+- [ ] 35. Create local k3d development runbook
   - Create `docs/runbooks/local-k3d-dev.md`
   - Must cover (each command block preceded by a `#` comment line):
     - k3d cluster creation command
@@ -389,7 +420,7 @@ All implementation is ordered so that each step produces artefacts consumed by t
 
 - [ ] 37. Update docs/security.md
   - Add a new section "Kubernetes Secrets Model" documenting: manual bootstrap via `kubectl create secret generic`, `secretKeyRef` references in manifests, no credentials in committed files, secret rotation procedure
-  - Add a new section "OCI Dual Firewall" documenting: the VCN Security List (Terraform-managed, opens TCP 22/80/6443) and the OS iptables rules (applied manually on the VM, opens TCP 80/6443); explain that both layers must allow a port for traffic to reach a pod
+  - Add a new section "OCI Dual Firewall" documenting: the VCN Security List (manually configured, opens TCP 22/80/6443) and the OS iptables rules (applied manually on the VM, opens TCP 80/6443); explain that both layers must allow a port for traffic to reach a pod
   - _Requirements: 15.3_
 
 - [ ] 38. Update docs/cheatsheet.md
@@ -405,17 +436,17 @@ All implementation is ordered so that each step produces artefacts consumed by t
   - _Requirements: 14.5_
 
 - [ ] 39. Create docs/backlog.md
-  - Create `docs/backlog.md` with all eleven out-of-scope future tasks organised under three priority tiers: **High**, **Medium**, **Low**
-  - For each of the eleven tasks, include: a one-sentence description of what it involves and a one-sentence explanation of why it is deferred
-  - The eleven tasks (all must be present): CI/CD (GitHub Actions), TLS/HTTPS (cert-manager + Let's Encrypt), Domain attachment, Alembic migrations, Traefik ingress, CORS hardening, Resource tuning, Vulnerability scanning, Prometheus + Grafana monitoring, Horizontal Pod Autoscaler, Multi-node k3s
-  - High priority: CI/CD, TLS/HTTPS, Domain
+  - Create `docs/backlog.md` with all twelve out-of-scope future tasks organised under three priority tiers: **High**, **Medium**, **Low**
+  - For each of the twelve tasks, include: a one-sentence description of what it involves and a one-sentence explanation of why it is deferred
+  - The twelve tasks (all must be present): Terraform Infrastructure Automation, CI/CD (GitHub Actions), TLS/HTTPS (cert-manager + Let's Encrypt), Domain attachment, Alembic migrations, Traefik ingress, CORS hardening, Resource tuning, Vulnerability scanning, Prometheus + Grafana monitoring, Horizontal Pod Autoscaler, Multi-node k3s
+  - High priority: Terraform Infrastructure Automation, CI/CD, TLS/HTTPS, Domain
   - Medium priority: Alembic migrations, Traefik ingress, CORS hardening, Resource tuning
   - Low priority: Vulnerability scanning, Monitoring, HPA, Multi-node k3s
   - _Requirements: 16.1, 16.2, 16.3_
 
 - [ ] 40. Final checkpoint — all documentation complete
-  - Verify all 11 entries are present in `docs/backlog.md`
-  - Verify all six ADR files (010–015) exist in `docs/decisions/`
+  - Verify all 12 entries are present in `docs/backlog.md` (including new Terraform automation entry)
+  - Verify all seven ADR files (010–016) exist in `docs/decisions/`
   - Verify all three runbook files exist in `docs/runbooks/`
   - Verify `docs/archive/` contains the three moved files plus `README.md`
   - Ask the user if any documentation corrections or additions are needed.
@@ -430,27 +461,33 @@ All implementation is ordered so that each step produces artefacts consumed by t
 - **Image tag strategy**: manifests use placeholder `ghcr.io/VikramBabariya/...<git_SHA>` tags. For k3d validation (task 13), temporarily swap to local tags with `imagePullPolicy: Never`, then revert before Phase 2. For OCI deployment (Phase 3), update tags to the actual ARM64 git SHA.
 - The `VITE_API_URL` build arg is the only difference between Phase 1 and Phase 3 frontend images — Phase 1 uses `http://localhost:8080`, Phase 3 uses `http://<OCI_PUBLIC_IP>:8000`
 - `inventory-secrets` is never created from a manifest file; it is bootstrapped manually (with test values for k3d, production values for OCI)
-- Phases 1–3 are ordered by dependency: manifests + k3d validation → Terraform → OCI deploy. Documentation tasks (24–40) are largely independent and can run in parallel with Phase 2 and Phase 3 tasks after Phase 1 is complete
+- Phases 1–3 are ordered by dependency: manifests + k3d validation → Manual OCI provisioning → OCI deploy. Documentation tasks (24–40) are largely independent and can run in parallel with Phase 2 and Phase 3 tasks after Phase 1 is complete
 
 ## Task Dependency Graph
 
 ```json
 {
   "waves": [
-    { "id": 0, "tasks": ["1", "14"] },
-    { "id": 1, "tasks": ["2", "3", "15", "16", "17", "18"] },
+    { "id": 0, "tasks": ["1"] },
+    { "id": 1, "tasks": ["2", "3"] },
     { "id": 2, "tasks": ["4", "6", "8", "10"] },
     { "id": 3, "tasks": ["5", "7", "9", "11"] },
     { "id": 4, "tasks": ["12.1", "12.3", "12.4", "12.5", "12.6"] },
-    { "id": 5, "tasks": ["12.2", "13.1", "24", "26", "27", "28", "29", "30", "31"] },
-    { "id": 6, "tasks": ["13.2", "13.3", "25", "32", "33", "34", "35", "36", "37", "38", "39"] },
+    { "id": 5, "tasks": ["12.2", "13.1"] },
+    { "id": 6, "tasks": ["13.2", "13.3"] },
     { "id": 7, "tasks": ["13.4"] },
     { "id": 8, "tasks": ["13.5"] },
     { "id": 9, "tasks": ["13.6"] },
     { "id": 10, "tasks": ["13.7", "13.8"] },
-    { "id": 11, "tasks": ["13.9", "20"] },
-    { "id": 12, "tasks": ["21"] },
-    { "id": 13, "tasks": ["22"] }
+    { "id": 11, "tasks": ["13.9"] },
+    { "id": 12, "tasks": ["14", "24", "26", "27", "28", "29", "30", "31"] },
+    { "id": 13, "tasks": ["15", "16", "17", "25", "32", "33", "34", "35", "36", "37", "38", "39"] },
+    { "id": 14, "tasks": ["18"] },
+    { "id": 15, "tasks": ["19"] },
+    { "id": 16, "tasks": ["20"] },
+    { "id": 17, "tasks": ["21"] },
+    { "id": 18, "tasks": ["22", "22.1", "22.2"] },
+    { "id": 19, "tasks": ["40"] }
   ]
 }
 ```
