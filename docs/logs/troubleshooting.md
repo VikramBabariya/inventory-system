@@ -241,3 +241,17 @@ docker exec -it inventory-system-redis-1 redis-cli DBSIZE
 The SQLAlchemy engine has `echo=True` in `database.py`.
 - On a **cache MISS**: you will see `SELECT` statements in `docker compose logs backend`
 - On a **cache HIT**: no SQL appears — the response came entirely from Redis
+
+
+---------------------------------------------------------------------------------------------------------
+
+### 📄 Major Incidents & Formal Reports
+
+For formal incident reports with detailed root cause analysis, timeline tracking, and prevention actions, see the **Incidents Directory**: `/docs/incidents/`
+
+**Recent Incidents:**
+- [INC-001: Backend Docker Permission Failure in Kubernetes](../incidents/001-backend-docker-permission-failure-k8s.md) (2026-08-13)
+- [INC-002: Database Schema Initialization Failure](../incidents/002-database-schema-initialization-failure.md) (2026-02-03)  
+- [INC-003: Cache Invalidation Data Inconsistency](../incidents/003-cache-invalidation-data-inconsistency.md) (2026-08-11)
+
+The troubleshooting log above focuses on **quick operational fixes** for common development issues. For **comprehensive incident analysis** and **lessons learned**, refer to the formal incident reports.

@@ -1,0 +1,34 @@
+# Frontend Deployment
+# Uses embedded Nginx to serve React static files and proxy /api/* to backend service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory-frontend
+  namespace: inventory
+  labels:
+    app: inventory-frontend
+    component: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: inventory-frontend
+  template:
+    metadata:
+      labels:
+        app: inventory-frontend
+        component: frontend
+    spec:
+      initContainers:
+      - name: wait-for-backend
+        image: busybox
+        command: ['sh', '-c', 'until nc -z backend 8000; do sleep 2; done']
+      containers:
+      - name: inventory-frontend
+        image: ghcr.io/VikramBabariya/inventory-frontend:<git_SHA>
+        ports:
+        - containerPort: 80
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80

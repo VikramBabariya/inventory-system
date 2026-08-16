@@ -3,3 +3,5 @@ node_modules/
 .env
 .DS_Store
 venv/
+
+# Note: OCI scripts use placeholder OCIDs - update with your actual values before running

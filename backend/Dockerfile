@@ -48,12 +48,16 @@ COPY --from=builder /opt/venv /opt/venv
 # 9. Activate the venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# 10. Security Hardening
+# 10. Copy Application Code (before user switch)
+COPY . .
+
+# 11. Security Hardening
 # By default, Docker runs as 'root'. If a hacker breaks in, they own the container.
 # We create a dummy user 'appuser' with no permissions and switch to it.
-RUN useradd -m appuser
+RUN useradd -m appuser && \
+    chown -R appuser:appuser /app
+
 USER appuser
 
-# 11. Run the App
-COPY . .
+# 12. Run the App
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
